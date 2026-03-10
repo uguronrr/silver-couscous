@@ -1,0 +1,288 @@
+"""Generate a rich CLI report and export to data/report.json."""
+
+import json
+import os
+import sqlite3
+from collections import Counter
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich import box
+
+import config
+import storage
+
+console = Console()
+
+REPORT_JSON_PATH = "data/report.json"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _pct(part: int, total: int) -> str:
+    if total == 0:
+        return "0.0%"
+    return f"{part / total * 100:.1f}%"
+
+
+def _truncate(text: str | None, length: int = 200) -> str:
+    if not text:
+        return "[dim](empty)[/dim]"
+    text = text.replace("\n", " ").strip()
+    return text[:length] + "…" if len(text) > length else text
+
+
+# ---------------------------------------------------------------------------
+# Section builders
+# ---------------------------------------------------------------------------
+
+def _section_collection_summary(stats: dict, report: dict) -> None:
+    modes = stats["scrape_modes"]
+    mode_str = ", ".join(f"{k}:{v}" for k, v in modes.items()) if modes else "—"
+
+    table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
+    table.add_column("Key", style="bold cyan", no_wrap=True)
+    table.add_column("Value")
+
+    rows = [
+        ("Total posts", str(stats["total_posts"])),
+        ("Total comments", str(stats["total_comments"])),
+        ("Unique users", str(stats["unique_users"])),
+        ("Earliest post", stats["earliest_post"] or "—"),
+        ("Latest post", stats["latest_post"] or "—"),
+        ("Scrape mode(s)", mode_str),
+    ]
+    for k, v in rows:
+        table.add_row(k, v)
+
+    console.print(Panel(table, title="[bold]1. Collection Summary", border_style="blue"))
+    report["collection_summary"] = dict(rows)
+
+    # Brand breakdown
+    if stats.get("brand_counts"):
+        bt = Table(title="Posts per brand", box=box.SIMPLE)
+        bt.add_column("Brand", style="cyan")
+        bt.add_column("Posts", justify="right")
+        for brand, cnt in stats["brand_counts"].items():
+            bt.add_row(brand or "—", str(cnt))
+        console.print(bt)
+    report["brand_breakdown"] = stats.get("brand_counts", {})
+
+    # Hashtag breakdown
+    ht = Table(title="Posts per source", box=box.SIMPLE)
+    ht.add_column("Source", style="cyan")
+    ht.add_column("Posts", justify="right")
+    for hashtag, cnt in sorted(stats["hashtag_counts"].items(), key=lambda x: -x[1]):
+        ht.add_row(hashtag, str(cnt))
+    console.print(ht)
+    report["hashtag_breakdown"] = stats["hashtag_counts"]
+
+
+def _section_sentiment(stats: dict, report: dict) -> None:
+    dist = stats["sentiment_distribution"]
+    total = sum(dist.values())
+
+    table = Table(box=box.SIMPLE)
+    table.add_column("Sentiment", style="bold")
+    table.add_column("Posts", justify="right")
+    table.add_column("% of analyzed", justify="right")
+
+    colors = {"positive": "green", "negative": "red", "neutral": "yellow"}
+    for label in ("positive", "negative", "neutral"):
+        cnt = dist.get(label, 0)
+        color = colors.get(label, "white")
+        table.add_row(f"[{color}]{label}[/{color}]", str(cnt), _pct(cnt, total))
+
+    console.print(Panel(table, title="[bold]2. Sentiment Distribution (Posts)", border_style="blue"))
+
+    if stats["total_comments"] == 0 and "public" in stats.get("scrape_modes", {}):
+        console.print(
+            "[dim italic]Comments not available in public mode. "
+            "Run with [bold]--auth[/] for full data including comments.[/dim italic]\n"
+        )
+
+    report["sentiment_distribution"] = {
+        k: {"count": dist.get(k, 0), "pct": _pct(dist.get(k, 0), total)}
+        for k in ("positive", "negative", "neutral")
+    }
+
+
+def _section_top_posts(report: dict) -> None:
+    with storage._conn() as conn:
+        rows = conn.execute(
+            """SELECT username, caption, like_count, comment_count, sentiment_label, sentiment_score
+               FROM posts
+               ORDER BY (like_count + comment_count) DESC
+               LIMIT 10"""
+        ).fetchall()
+
+    table = Table(box=box.SIMPLE, show_lines=True)
+    table.add_column("#", justify="right", style="dim", width=3)
+    table.add_column("User", style="cyan", no_wrap=True, max_width=16)
+    table.add_column("Caption (truncated)", max_width=60)
+    table.add_column("Likes", justify="right")
+    table.add_column("Cmts", justify="right")
+    table.add_column("Sentiment", justify="center")
+
+    top_posts_data = []
+    for i, r in enumerate(rows, 1):
+        sentiment = r["sentiment_label"] or "—"
+        colors = {"positive": "green", "negative": "red", "neutral": "yellow"}
+        color = colors.get(sentiment, "white")
+        table.add_row(
+            str(i),
+            r["username"] or "—",
+            _truncate(r["caption"], 120),
+            str(r["like_count"] or 0),
+            str(r["comment_count"] or 0),
+            f"[{color}]{sentiment}[/{color}]",
+        )
+        top_posts_data.append(dict(r))
+
+    console.print(Panel(table, title="[bold]3. Top 10 Engaged Posts", border_style="blue"))
+    report["top_posts"] = top_posts_data
+
+
+def _section_themes(report: dict) -> None:
+    with storage._conn() as conn:
+        captions = conn.execute("SELECT caption FROM posts WHERE caption IS NOT NULL").fetchall()
+
+    all_text = " ".join(r[0].lower() for r in captions)
+    counts = Counter()
+    for kw in config.KEYWORDS_IN_CAPTIONS:
+        counts[kw] = all_text.count(kw)
+
+    table = Table(box=box.SIMPLE)
+    table.add_column("Keyword", style="bold")
+    table.add_column("Occurrences", justify="right")
+    for kw, cnt in counts.most_common():
+        table.add_row(kw, str(cnt))
+
+    console.print(Panel(table, title="[bold]4. Most Discussed Themes (Brand Keywords)", border_style="blue"))
+    report["themes"] = dict(counts.most_common())
+
+
+def _section_sentiment_by_hashtag(report: dict) -> None:
+    with storage._conn() as conn:
+        rows = conn.execute(
+            """SELECT source_hashtag,
+                      AVG(CASE WHEN sentiment_label='positive' THEN 1
+                               WHEN sentiment_label='negative' THEN -1
+                               ELSE 0 END) as avg_score,
+                      COUNT(*) as cnt
+               FROM posts
+               WHERE sentiment_label IS NOT NULL
+               GROUP BY source_hashtag
+               ORDER BY avg_score DESC"""
+        ).fetchall()
+
+    table = Table(box=box.SIMPLE)
+    table.add_column("Hashtag", style="cyan")
+    table.add_column("Posts", justify="right")
+    table.add_column("Avg Sentiment", justify="right")
+
+    ht_data = {}
+    for r in rows:
+        score = r["avg_score"] or 0
+        color = "green" if score > 0.1 else "red" if score < -0.1 else "yellow"
+        table.add_row(
+            f"#{r['source_hashtag']}",
+            str(r["cnt"]),
+            f"[{color}]{score:+.3f}[/{color}]",
+        )
+        ht_data[r["source_hashtag"]] = {"posts": r["cnt"], "avg_sentiment": round(score, 4)}
+
+    console.print(Panel(table, title="[bold]5. Sentiment by Source", border_style="blue"))
+    report["sentiment_by_hashtag"] = ht_data
+
+
+def _section_sample_voices(report: dict) -> None:
+    with storage._conn() as conn:
+        pos = conn.execute(
+            "SELECT caption FROM posts WHERE sentiment_label='positive' ORDER BY RANDOM() LIMIT 3"
+        ).fetchall()
+        neg = conn.execute(
+            "SELECT caption FROM posts WHERE sentiment_label='negative' ORDER BY RANDOM() LIMIT 3"
+        ).fetchall()
+
+    pos_texts = [_truncate(r[0]) for r in pos]
+    neg_texts = [_truncate(r[0]) for r in neg]
+
+    content = ""
+    content += "[bold green]✦ Positive voices[/]\n"
+    for t in pos_texts or ["[dim]No positive posts yet[/dim]"]:
+        content += f"  • {t}\n"
+    content += "\n[bold red]✦ Negative voices[/]\n"
+    for t in neg_texts or ["[dim]No negative posts yet[/dim]"]:
+        content += f"  • {t}\n"
+
+    console.print(Panel(content, title="[bold]6. Sample Voices", border_style="blue"))
+    report["sample_voices"] = {"positive": pos_texts, "negative": neg_texts}
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def generate_report() -> dict:
+    storage.init_db()
+    stats = storage.get_stats()
+    report: dict = {}
+
+    console.rule("[bold blue]BRAND SENTIMENT REPORT — Arçelik · Castrol · Karaca")
+    console.print(f"[dim]Instagram public opinion analysis | Generated by pipeline[/dim]\n")
+
+    if stats["total_posts"] == 0:
+        console.print(
+            Panel(
+                "[yellow]No posts found in the database.\n\n"
+                "Possible reasons:\n"
+                "  • Public scraping was blocked (datacenter IP)\n"
+                "  • Hashtags returned no results\n\n"
+                "Suggestions:\n"
+                "  1. Try [bold]python main.py scrape --auth[/] with IG credentials\n"
+                "  2. Use a residential proxy: [bold]--proxy socks5://...[/]\n"
+                "  3. Re-run later (rate limits are temporary)",
+                title="[bold red]No Data Collected",
+                border_style="red",
+            )
+        )
+        report["error"] = "no_data"
+        _export_json(report)
+        return report
+
+    _section_collection_summary(stats, report)
+    _section_sentiment(stats, report)
+    _section_top_posts(report)
+    _section_themes(report)
+    _section_sentiment_by_hashtag(report)
+    _section_sample_voices(report)
+
+    # Mode notice
+    if "public" in stats.get("scrape_modes", {}) and stats["total_comments"] == 0:
+        console.print(
+            Panel(
+                "[yellow]All data was collected in [bold]public mode[/bold].\n"
+                "Comments are not available without authentication.\n\n"
+                "To unlock comments + more posts:\n"
+                "  [bold cyan]export IG_USERNAME=your_throwaway_account[/]\n"
+                "  [bold cyan]export IG_PASSWORD=your_password[/]\n"
+                "  [bold cyan]python main.py full --auth[/]",
+                title="ℹ  Public Mode Notice",
+                border_style="yellow",
+            )
+        )
+
+    console.rule("[bold blue]END OF REPORT")
+    _export_json(report)
+    return report
+
+
+def _export_json(report: dict) -> None:
+    os.makedirs("data", exist_ok=True)
+    with open(REPORT_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+    console.print(f"\n[dim]Report exported → [bold]{REPORT_JSON_PATH}[/][/dim]")
