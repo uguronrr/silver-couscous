@@ -93,6 +93,31 @@ IG_COOKIES: str | None = os.environ.get("IG_COOKIES")         # full cookie head
 SESSION_PATH = "data/session.json"
 
 # ---------------------------------------------------------------------------
+# Session pool & task queue
+# ---------------------------------------------------------------------------
+
+SESSION_POOL_DB = "data/sessions.db"
+TASK_QUEUE_DB = "data/tasks.db"
+
+MAX_REQUESTS_PER_SESSION_PER_DAY = 150
+MAX_REQUESTS_PER_SESSION_PER_HOUR = 30
+
+# Cooldown escalation: 1 hr → 4 hr → 24 hr (minutes)
+COOLDOWN_LEVELS = [60, 240, 1440]
+
+INTER_TASK_DELAY = (120, 300)        # seconds between tasks
+SESSION_IDLE_DELAY = (3600, 10800)   # seconds between session runs (1–3 hr)
+
+# ---------------------------------------------------------------------------
+# Warm-up
+# ---------------------------------------------------------------------------
+
+WARMUP_ENABLED = True
+WARMUP_SCROLL_RANGE = (3, 8)
+WARMUP_LIKE_PROBABILITY = 0.15
+WARMUP_EXPLORE_PROBABILITY = 0.4
+
+# ---------------------------------------------------------------------------
 # Sentiment model
 # ---------------------------------------------------------------------------
 
