@@ -98,6 +98,7 @@ def cmd_stalk(args: argparse.Namespace) -> None:
         total_posts=args.total,
         session=session,
         cookies=cookies,
+        brand=args.brand,
     )
     asyncio.run(runner.run())
 
@@ -329,6 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help=f"Target username (default: {config.STALK_TARGET})")
     p_stalk.add_argument("--total", type=int, default=config.STALK_TOTAL_POSTS,
                          help=f"Total posts to collect (default: {config.STALK_TOTAL_POSTS})")
+    p_stalk.add_argument("--brand", default="Castrol", help="Brand name for scraped posts")
 
     # multistalk
     p_ms = sub.add_parser("multistalk", help="Interleaved multi-target stalk session")

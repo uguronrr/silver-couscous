@@ -39,7 +39,7 @@ class BrowserProfile:
             "timezone_id": "Europe/Istanbul",
             "color_scheme": "light",
             "device_scale_factor": 1.0,
-            "sec_ch_ua": '"Chromium";v="136", "Google Chrome";v="136", "Not-A.Brand";v="99"',
+            "sec_ch_ua": '"Chromium";v="135", "Google Chrome";v="135", "Not-A.Brand";v="99"',
             "sec_ch_ua_mobile": "?0",
             "sec_ch_ua_platform": '"Windows"',
             "platform": "Win32",

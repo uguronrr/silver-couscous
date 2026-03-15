@@ -75,22 +75,6 @@ class WebSession:
         if token:
             self._s.headers["x-csrftoken"] = token
 
-    def _update_referer(self, url: str) -> None:
-        """Set a plausible Referer header."""
-        if "/api/v1/feed/user/" in url or "/api/v1/media/" in url:
-            ref = f"{self.BASE}/{self._current_username}/" if self._current_username else self.BASE + "/"
-        elif "/api/v1/feed/timeline/" in url or "/api/v1/news/inbox/" in url:
-            ref = self.BASE + "/"
-        else:
-            ref = self.BASE + "/"
-        self._s.headers["Referer"] = ref
-
-    def _refresh_csrf(self) -> None:
-        """Update x-csrftoken from cookies."""
-        token = self._s.cookies.get("csrftoken")
-        if token:
-            self._s.headers["x-csrftoken"] = token
-
     def _update_referer(self, path: str) -> None:
         """Set a plausible Referer header based on the URL path."""
         # Use full URL matching logic or path-based logic

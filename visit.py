@@ -49,12 +49,14 @@ class ProfileScrollActivity:
         posts_target: int,
         progress: dict,
         on_page_done: callable,
+        brand: str = "Unknown",
     ) -> None:
         self.web_session = web_session
         self.target_username = target_username
         self.posts_target = posts_target
         self.progress = progress
         self.on_page_done = on_page_done
+        self.brand = brand
 
     async def execute(self) -> int:
         """Execute profile scrolling via API pagination. Return posts collected."""
@@ -90,7 +92,7 @@ class ProfileScrollActivity:
             self.web_session.fetch_profile_pages(
                 user_id=user_id,
                 username=self.target_username,
-                brand="Castrol",
+                brand=self.brand,
                 max_posts=self.posts_target,
                 resume_cursor=next_cursor,
                 on_page_done=_on_page_done,
@@ -129,12 +131,14 @@ class Visit:
         progress: dict,
         target_username: str,
         on_page_done: callable,
+        brand: str = "Unknown",
     ) -> None:
         self.plan = plan
         self.cookies = cookies
         self.progress = progress
         self.target_username = target_username
         self.on_page_done = on_page_done
+        self.brand = brand
 
     async def execute(self) -> int:
         """Execute the visit and return posts collected."""
@@ -229,6 +233,7 @@ class Visit:
                             self.plan.posts_target - posts_collected,
                             self.progress,
                             self.on_page_done,
+                            brand=self.brand,
                         )
                         posts = await scroll.execute()
                         posts_collected += posts

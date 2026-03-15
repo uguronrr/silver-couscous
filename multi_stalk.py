@@ -175,6 +175,7 @@ class MultiStalkRunner:
             progress_file=target.progress_file,
             visit_min_posts=target.visit_min_posts,
             visit_max_posts=target.visit_max_posts,
+            brand=target.brand,
         )
         
         # We need to capture the return value (posts collected). 
@@ -268,6 +269,7 @@ class MultiStalkRunner:
             except Exception:
                 pass
 
+            await context.close()
             await browser.close()
 
     def _load_progress(self, target: StalkTarget) -> dict:

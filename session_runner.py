@@ -44,6 +44,7 @@ class SessionRunner:
         progress_file: str | None = None,
         visit_min_posts: int | None = None,
         visit_max_posts: int | None = None,
+        brand: str = "Unknown",
     ) -> None:
         self.target_username = target_username
         self.total_posts = total_posts
@@ -52,6 +53,7 @@ class SessionRunner:
         self.progress_file = Path(progress_file or config.STALK_PROGRESS_FILE)
         self.visit_min = visit_min_posts or config.STALK_VISIT_MIN_POSTS
         self.visit_max = visit_max_posts or config.STALK_VISIT_MAX_POSTS
+        self.brand = brand
         self.progress = self._load_progress()
         self.visit_plans: list[VisitPlan] = []
         self._hydrate_visit_plans()
@@ -137,11 +139,12 @@ class SessionRunner:
                     sleep_seconds = plan.gap_after_minutes * 60
                     await asyncio.sleep(sleep_seconds)
 
-            # Mark as done
-            self.progress["status"] = "done"
-            self.progress["finished_at"] = datetime.now(timezone.utc).isoformat()
-            self._save_progress()
-            self._print_summary()
+            # Only mark done if we ran the full schedule (not paused by max_visits)
+            if max_visits is None or self.progress["posts_collected"] >= self.total_posts:
+                self.progress["status"] = "done"
+                self.progress["finished_at"] = datetime.now(timezone.utc).isoformat()
+                self._save_progress()
+                self._print_summary()
 
         except ChallengeError:
             self._handle_challenge()
@@ -160,6 +163,7 @@ class SessionRunner:
             progress=self.progress,
             target_username=self.target_username,
             on_page_done=self._on_page_done,
+            brand=self.brand,
         )
         posts_collected = await visit.execute()
         return posts_collected
