@@ -81,7 +81,7 @@ def _section_collection_summary(stats: dict, report: dict) -> None:
     report["hashtag_breakdown"] = stats["hashtag_counts"]
 
 
-def _section_themes(report: dict) -> None:
+def _section_top_posts(report: dict) -> None:
     with storage._conn() as conn:
         rows = conn.execute(
             """SELECT username, caption, like_count, comment_count

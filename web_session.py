@@ -556,6 +556,18 @@ def _extract_hashtags(text: str | None) -> list[str]:
     return re.findall(r"#(\w+)", text, re.UNICODE)
 
 
+def _parse_cookie_string(cookie_str: str) -> dict:
+    """Parse a browser Cookie header string into a dict."""
+    from urllib.parse import unquote
+    result = {}
+    for part in cookie_str.split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, _, v = part.partition("=")
+            result[k.strip()] = unquote(v.strip())
+    return result
+
+
 def _make_post(
     *, media_id, user_id, username, caption, like_count,
     comment_count, taken_at, is_video, brand,

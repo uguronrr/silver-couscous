@@ -71,7 +71,7 @@ class Exporter:
                     if not rows:
                         break
                     writer.writerows(rows)
-                    row_count += 1000
+                    row_count += len(rows)
                 
                 tf_path = tf.name
                 

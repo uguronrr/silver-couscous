@@ -1,5 +1,5 @@
 import os
-import requests
+from curl_cffi import requests as _curl
 from PIL import Image
 from io import BytesIO
 import config
@@ -16,10 +16,7 @@ class MediaDownloader:
         os.makedirs(self.media_dir, exist_ok=True)
         # Convert GB to bytes
         self.max_bytes = config.MAX_MEDIA_STORAGE_GB * 1024 * 1024 * 1024
-        self._session = requests.Session()
-        self._session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        })
+        self._session = _curl.Session(impersonate="chrome")
 
     def _check_storage_limit(self) -> bool:
         """Returns True if storage usage is below limit."""

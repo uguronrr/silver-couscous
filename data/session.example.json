@@ -1,0 +1,15 @@
+{
+    "cookies": {
+        "sessionid": "YOUR_SESSIONID_HERE",
+        "ds_user_id": "YOUR_DS_USER_ID",
+        "datr": "",
+        "ig_did": "",
+        "mid": "",
+        "ig_nrcb": "1",
+        "ps_l": "1",
+        "ps_n": "1",
+        "csrftoken": "YOUR_CSRFTOKEN",
+        "wd": "885x788",
+        "rur": ""
+    }
+}

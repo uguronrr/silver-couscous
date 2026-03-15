@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.DS_Store
+data/opinion_data.db
+data/sessions.db
+data/tasks.db
+data/session.json
+data/stalk_progress.json
+data/stalk_*_progress.json
+data/media/
+data/stalk.log
+data/current_scraped_data.json
+*.zip

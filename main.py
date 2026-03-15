@@ -1,4 +1,4 @@
-"""CLI entrypoint for the brand sentiment scraper pipeline.
+"""CLI entrypoint for the Instagram brand scraper pipeline.
 
 Usage:
     python main.py scrape                           # Run orchestrator (session pool)
@@ -33,16 +33,6 @@ console = Console()
 # ---------------------------------------------------------------------------
 
 def cmd_scrape(args: argparse.Namespace) -> None:
-    if getattr(args, "legacy", False):
-        # Keep old single-session behaviour for quick tests
-        import scraper as scraper_module
-        mode = "auth" if args.auth else config.SCRAPE_MODE
-        s = scraper_module.get_scraper(mode)
-        if args.proxy:
-            s.set_proxy(args.proxy)
-        s.run()
-        return
-
     from orchestrator import Orchestrator
     orch = Orchestrator()
     orch.schedule_and_run()
@@ -181,7 +171,7 @@ def cmd_sessions(args: argparse.Namespace) -> None:
 
 def _sessions_add(pool) -> None:
     from session_pool import SessionPool
-    from scraper import _parse_cookie_string
+    from web_session import _parse_cookie_string
 
     console.print("\n[bold cyan]Add new session[/]")
     username = input("Instagram username: ").strip()
@@ -227,10 +217,12 @@ def cmd_stats(_args: argparse.Namespace) -> None:
     table.add_row("Unique users", str(stats["unique_users"]))
     table.add_row("Earliest post", stats["earliest_post"] or "—")
     table.add_row("Latest post", stats["latest_post"] or "—")
-    table.add_row(
-        "Sentiment dist.",
-        " | ".join(f"{k}: {v}" for k, v in stats["sentiment_distribution"].items()),
-    )
+    try:
+        media_bytes = storage.get_media_storage_bytes()
+        media_mb = media_bytes / (1024 * 1024)
+        table.add_row("Media storage", f"{media_mb:.1f} MB")
+    except Exception:
+        pass
     table.add_row(
         "Scrape modes",
         " | ".join(f"{k}: {v}" for k, v in stats["scrape_modes"].items()),
@@ -323,7 +315,7 @@ def _write_csv(path: str, rows: list[dict]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="main.py",
-        description="Brand sentiment scraper pipeline",
+        description="Instagram brand scraper pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -331,10 +323,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # scrape
     p_scrape = sub.add_parser("scrape", help="Run orchestrator (session pool)")
-    p_scrape.add_argument("--legacy", action="store_true",
-                          help="Use legacy single-session scraper")
-    p_scrape.add_argument("--auth", action="store_true",
-                          help="(legacy) Use authenticated mode")
     p_scrape.add_argument("--proxy", metavar="URL")
 
     # report
@@ -342,8 +330,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # full
     p_full = sub.add_parser("full", help="scrape + report")
-    p_full.add_argument("--legacy", action="store_true")
-    p_full.add_argument("--auth", action="store_true")
     p_full.add_argument("--proxy", metavar="URL")
 
     # warmup

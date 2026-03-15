@@ -1,4 +1,4 @@
-"""Central configuration for the brand sentiment scraper pipeline.
+"""Central configuration for the Instagram brand scraper pipeline.
 
 Brands tracked: Arçelik, Castrol, Karaca
 Primary strategy: scrape official brand accounts directly (reliable).
