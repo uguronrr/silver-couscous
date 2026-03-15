@@ -14,6 +14,7 @@ from urllib.parse import unquote
 
 from rich.console import Console
 
+from browser_profile import BrowserProfile
 import config
 from exceptions import ChallengeError, RateLimitError, SessionExpiredError
 from timing import human_delay
@@ -32,7 +33,7 @@ class WebSession:
     BASE = "https://www.instagram.com"
     APP_ID = "936619743392459"
 
-    def __init__(self, cookies: dict, proxy_url: str = "") -> None:
+    def __init__(self, cookies: dict, proxy_url: str = "", profile: BrowserProfile | None = None) -> None:
         try:
             from curl_cffi import requests as _curl
         except ImportError as exc:
@@ -43,6 +44,8 @@ class WebSession:
         self._s = _curl.Session(impersonate="chrome")
         self._proxy_url = proxy_url
         self._proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else {}
+        self.profile = profile or BrowserProfile()
+        self._current_username = ""
 
         # Inject cookies onto the session
         for k, v in cookies.items():
@@ -52,19 +55,54 @@ class WebSession:
         self._user_id = str(cookies.get("ds_user_id", ""))
 
         self._s.headers.update({
+            **self.profile.to_api_headers(),
             "x-ig-app-id": self.APP_ID,
             "x-csrftoken": cookies.get("csrftoken", ""),
+            "x-asbd-id": "129477",
+            "x-ig-www-claim": "0",
             "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/133.0.0.0 Safari/537.36"
-            ),
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Origin": "https://www.instagram.com",
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-origin",
+            "Connection": "keep-alive",
         })
+
+    def _refresh_csrf(self) -> None:
+        """Update x-csrftoken from cookies."""
+        token = self._s.cookies.get("csrftoken")
+        if token:
+            self._s.headers["x-csrftoken"] = token
+
+    def _update_referer(self, url: str) -> None:
+        """Set a plausible Referer header."""
+        if "/api/v1/feed/user/" in url or "/api/v1/media/" in url:
+            ref = f"{self.BASE}/{self._current_username}/" if self._current_username else self.BASE + "/"
+        elif "/api/v1/feed/timeline/" in url or "/api/v1/news/inbox/" in url:
+            ref = self.BASE + "/"
+        else:
+            ref = self.BASE + "/"
+        self._s.headers["Referer"] = ref
+
+    def _refresh_csrf(self) -> None:
+        """Update x-csrftoken from cookies."""
+        token = self._s.cookies.get("csrftoken")
+        if token:
+            self._s.headers["x-csrftoken"] = token
+
+    def _update_referer(self, path: str) -> None:
+        """Set a plausible Referer header based on the URL path."""
+        # Use full URL matching logic or path-based logic
+        url = f"{self.BASE}{path}" if path.startswith("/") else path
+        
+        if "/api/v1/feed/user/" in url or "/api/v1/media/" in url:
+            ref = f"{self.BASE}/{self._current_username}/" if self._current_username else self.BASE + "/"
+        elif "/api/v1/feed/timeline/" in url or "/api/v1/news/inbox/" in url:
+            ref = self.BASE + "/"
+        else:
+            ref = self.BASE + "/"
+        self._s.headers["Referer"] = ref
 
     # ------------------------------------------------------------------
     # Core request helpers
@@ -73,9 +111,17 @@ class WebSession:
     def get(self, path: str, **kwargs) -> dict:
         """GET a path under BASE with proxy, delay, and error detection."""
         human_delay()
+        self._refresh_csrf()
         url = f"{self.BASE}{path}" if path.startswith("/") else path
+        self._update_referer(path)
+        
+        # Merge kwargs headers if any, but default to session headers
+        headers = kwargs.pop("headers", {})
+        # Remove Referer from manual headers if present (handled by _update_referer)
+        headers.pop("Referer", None)
+        
         resp = self._s.get(
-            url, proxies=self._proxies, timeout=20, **kwargs
+            url, proxies=self._proxies, timeout=20, headers=headers, **kwargs
         )
         self._check(resp)
         return resp.json()
@@ -104,10 +150,10 @@ class WebSession:
 
     def get_user_id(self, username: str) -> str:
         """Resolve Instagram username → numeric user ID."""
+        self._current_username = username
         data = self.get(
             "/api/v1/users/web_profile_info/",
             params={"username": username},
-            headers={"Referer": f"{self.BASE}/{username}/"},
         )
         user = data.get("data", {}).get("user")
         if not user:
@@ -127,10 +173,10 @@ class WebSession:
         if max_posts is None:
             max_posts = config.POSTS_PER_ACCOUNT
 
+        self._current_username = username
         data = self.get(
             "/api/v1/users/web_profile_info/",
             params={"username": username},
-            headers={"Referer": f"{self.BASE}/{username}/"},
         )
         user = data.get("data", {}).get("user")
         if not user:
@@ -256,7 +302,6 @@ class WebSession:
             resp_data = self.get(
                 f"/api/v1/feed/user/{user_id}/",
                 params=params,
-                headers={"Referer": f"{self.BASE}/{username}/"},
             )
 
             items = resp_data.get("items", [])
@@ -341,7 +386,6 @@ class WebSession:
             data = self.get(
                 f"/api/v1/media/{media_id}/comments/",
                 params={"can_support_threading": "true", "permalink_enabled": "false"},
-                headers={"Referer": f"{self.BASE}/{username}/"},
             )
             out = []
             for c in data.get("comments", [])[:config.MAX_COMMENTS_PER_POST]:

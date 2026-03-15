@@ -103,6 +103,46 @@ def cmd_stalk(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# multistalk — interleaved multi-target stalk session
+# ---------------------------------------------------------------------------
+
+def cmd_multistalk(args: argparse.Namespace) -> None:
+    import asyncio, json
+    from session_pool import SessionPool
+    from multi_stalk import MultiStalkRunner, StalkTarget
+
+    pool = SessionPool()
+    session = pool.get_next_session()
+    if not session:
+        console.print("[red]No active sessions. Run: python main.py sessions add[/]")
+        sys.exit(1)
+
+    cookies = json.loads(session["cookies_json"])
+
+    targets = [
+        StalkTarget(
+            username="castrolturkiye",
+            total_posts=args.castrol_total,
+            brand="Castrol",
+            progress_file=config.STALK_CASTROL_PROGRESS_FILE,
+            visit_min_posts=config.STALK_VISIT_MIN_POSTS,
+            visit_max_posts=config.STALK_VISIT_MAX_POSTS,
+        ),
+        StalkTarget(
+            username="karaca",
+            total_posts=args.karaca_total,
+            brand="Karaca",
+            progress_file=config.STALK_KARACA_PROGRESS_FILE,
+            visit_min_posts=config.STALK_KARACA_VISIT_MIN_POSTS,
+            visit_max_posts=config.STALK_KARACA_VISIT_MAX_POSTS,
+        ),
+    ]
+
+    runner = MultiStalkRunner(targets=targets, session=session, cookies=cookies)
+    asyncio.run(runner.run())
+
+
+# ---------------------------------------------------------------------------
 # sessions subcommands
 # ---------------------------------------------------------------------------
 
@@ -290,6 +330,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_stalk.add_argument("--total", type=int, default=config.STALK_TOTAL_POSTS,
                          help=f"Total posts to collect (default: {config.STALK_TOTAL_POSTS})")
 
+    # multistalk
+    p_ms = sub.add_parser("multistalk", help="Interleaved multi-target stalk session")
+    p_ms.add_argument(
+        "--castrol-total", type=int, default=1004,
+        help="Total Castrol posts to collect"
+    )
+    p_ms.add_argument(
+        "--karaca-total", type=int, default=config.STALK_KARACA_TOTAL,
+        help="Total Karaca posts to collect"
+    )
+
     # sessions
     p_sess = sub.add_parser("sessions", help="Manage session pool")
     sess_sub = p_sess.add_subparsers(dest="sessions_cmd", metavar="ACTION")
@@ -327,6 +378,7 @@ def main() -> None:
         "full": cmd_full,
         "warmup": cmd_warmup,
         "stalk": cmd_stalk,
+        "multistalk": cmd_multistalk,
         "sessions": cmd_sessions,
         "stats": cmd_stats,
         "export": cmd_export,

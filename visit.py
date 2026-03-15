@@ -10,8 +10,10 @@ from rich.console import Console
 import config
 import storage
 from exceptions import ChallengeError, RateLimitError
+from browser_profile import BrowserProfile
+from playwright_stealth import stealth_async
 from warmup import (
-    BrowserProfile, HumanMouse, HumanScroller,
+    HumanMouse, HumanScroller,
     FeedBrowseRoutine, StoryWatchRoutine, ExploreBrowseRoutine,
     ProfileVisitRoutine, SearchRoutine
 )
@@ -124,14 +126,12 @@ class Visit:
         self,
         plan,  # VisitPlan
         cookies: dict,
-        web_session: WebSession,
         progress: dict,
         target_username: str,
         on_page_done: callable,
     ) -> None:
         self.plan = plan
         self.cookies = cookies
-        self.web_session = web_session
         self.progress = progress
         self.target_username = target_username
         self.on_page_done = on_page_done
@@ -139,6 +139,10 @@ class Visit:
     async def execute(self) -> int:
         """Execute the visit and return posts collected."""
         console.print(f"  [dim]Plan: {self.plan.posts_target} posts, {self.plan.duration_budget_minutes:.0f} min[/]")
+
+        # Create profile and web session for this visit
+        profile = BrowserProfile()
+        web_session = WebSession(cookies=self.cookies, profile=profile)
 
         # Build activity sequence
         sequence = self._build_activity_sequence()
@@ -150,22 +154,62 @@ class Visit:
             raise ImportError("playwright required. Run: pip install 'playwright>=1.40'") from e
 
         async with async_playwright() as p:
-            profile = BrowserProfile()
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-infobars",
+                    "--disable-dev-shm-usage",
+                    "--disable-plugins-discovery",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                    "--disable-sync",
+                    "--disable-translate",
+                    "--hide-scrollbars",
+                    "--metrics-recording-only",
+                    "--mute-audio",
+                    "--safebrowsing-disable-auto-update",
+                    "--ignore-certificate-errors",
+                    "--ignore-ssl-errors",
+                ],
+            )
             context = await browser.new_context(**profile.to_context_kwargs())
+            page = await context.new_page()
+
+            await stealth_async(page)
+
+            await page.add_init_script(f"""
+                Object.defineProperty(navigator, 'platform', {{
+                    get: () => '{profile.platform}'
+                }});
+                Object.defineProperty(navigator, 'languages', {{
+                    get: () => ['{profile.locale}', '{profile.locale.split('-')[0]}', 'en-US', 'en']
+                }});
+                Object.defineProperty(navigator, 'hardwareConcurrency', {{
+                    get: () => {profile.hardware_concurrency}
+                }});
+                Object.defineProperty(navigator, 'deviceMemory', {{
+                    get: () => {profile.device_memory}
+                }});
+                window.chrome = {{
+                    runtime: {{}},
+                    loadTimes: function() {{}},
+                    csi: function() {{}},
+                    app: {{}}
+                }};
+            """)
 
             # Inject cookies
-            for k, v in self.cookies.items():
-                try:
-                    await context.add_cookies([{
-                        "name": k,
-                        "value": str(v),
-                        "url": "https://www.instagram.com",
-                    }])
-                except Exception:
-                    pass
+            await context.add_cookies([
+                {"name": k, "value": str(v),
+                 "domain": ".instagram.com", "path": "/"}
+                for k, v in self.cookies.items()
+            ])
 
-            page = await context.new_page()
             mouse = HumanMouse(page)
             scroller = HumanScroller(page, mouse)
 
@@ -174,15 +218,15 @@ class Visit:
             try:
                 # Execute activity sequence
                 for i, activity in enumerate(sequence):
-                    if self.progress["posts_collected"] >= self.plan.posts_target:
+                    if posts_collected >= self.plan.posts_target:
                         break
 
                     if activity.activity_type == ActivityType.PROFILE_SCROLL:
                         console.print(f"  → opening {self.target_username} profile")
                         scroll = ProfileScrollActivity(
-                            self.web_session,
+                            web_session,
                             self.target_username,
-                            self.plan.posts_target - self.progress["posts_collected"],
+                            self.plan.posts_target - posts_collected,
                             self.progress,
                             self.on_page_done,
                         )

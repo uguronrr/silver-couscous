@@ -151,3 +151,16 @@ STALK_VISIT_MIN_POSTS = 120
 STALK_VISIT_MAX_POSTS = 220
 STALK_GAP_MIN_MINUTES = 25.0
 STALK_GAP_MAX_MINUTES = 50.0
+
+# Multi-stalk (interleaved targets)
+STALK_KARACA_USERNAME = "karaca"
+STALK_KARACA_TOTAL = int(os.environ.get("STALK_KARACA_TOTAL", "3833"))
+STALK_KARACA_PROGRESS_FILE = "data/stalk_karaca_progress.json"
+STALK_CASTROL_PROGRESS_FILE = "data/stalk_castrolturkiye_progress.json"
+
+MULTI_STALK_GAP_MIN_MINUTES = 18.0
+MULTI_STALK_GAP_MAX_MINUTES = 35.0
+
+# Karaca visit sizing — larger range to handle 3833 posts
+STALK_KARACA_VISIT_MIN_POSTS = 150
+STALK_KARACA_VISIT_MAX_POSTS = 280

@@ -17,52 +17,11 @@ import random
 from abc import ABC, abstractmethod
 
 from rich.console import Console
+from playwright_stealth import stealth_async
+
+from browser_profile import BrowserProfile
 
 console = Console()
-
-
-# ---------------------------------------------------------------------------
-# Browser profile
-# ---------------------------------------------------------------------------
-
-class BrowserProfile:
-    """Randomized but internally consistent browser profile per session."""
-
-    VIEWPORTS = [
-        {"width": 1280, "height": 720},
-        {"width": 1366, "height": 768},
-        {"width": 1440, "height": 900},
-        {"width": 1536, "height": 864},
-        {"width": 1920, "height": 1080},
-    ]
-    USER_AGENTS = [
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
-    ]
-    LOCALES = ["en-US", "en-GB", "tr-TR", "de-DE"]
-    TIMEZONES = ["America/New_York", "Europe/London", "Europe/Istanbul", "Europe/Berlin"]
-
-    def __init__(self) -> None:
-        self.viewport = random.choice(self.VIEWPORTS)
-        self.user_agent = random.choice(self.USER_AGENTS)
-        idx = random.randrange(len(self.LOCALES))
-        self.locale = self.LOCALES[idx]
-        self.timezone = self.TIMEZONES[idx]
-
-    def to_context_kwargs(self) -> dict:
-        return {
-            "viewport": self.viewport,
-            "user_agent": self.user_agent,
-            "locale": self.locale,
-            "timezone_id": self.timezone,
-            "color_scheme": random.choice(["light", "dark", "no-preference"]),
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +44,17 @@ class HumanMouse:
 
     async def click_at(self, x: int, y: int) -> None:
         await self.move_to(x, y)
-        await asyncio.sleep(random.uniform(0.05, 0.3))
+        for _ in range(random.randint(0, 2)):
+            await self._page.mouse.move(
+                x + random.randint(-3, 3),
+                y + random.randint(-2, 2),
+            )
+            await asyncio.sleep(random.uniform(0.03, 0.10))
+        await asyncio.sleep(random.uniform(0.08, 0.32))
         await self._page.mouse.down()
-        await asyncio.sleep(random.uniform(0.04, 0.12))
+        await asyncio.sleep(random.uniform(0.06, 0.18))
         await self._page.mouse.up()
+        await asyncio.sleep(random.uniform(0.05, 0.14))
 
     async def click_element(self, selector: str) -> bool:
         try:
@@ -135,8 +101,18 @@ class HumanMouse:
                   + 3*(1-t)*t**2 * cp2[0] + t**3 * x1)
             by = ((1-t)**3 * y0 + 3*(1-t)**2*t * cp1[1]
                   + 3*(1-t)*t**2 * cp2[1] + t**3 * y1)
-            path.append((int(bx + random.gauss(0, 0.5)),
-                         int(by + random.gauss(0, 0.5))))
+            path.append((int(bx + random.gauss(0, 0.4)),
+                         int(by + random.gauss(0, 0.4))))
+        
+        if random.random() < 0.08:
+            overshoot_x = x1 + random.randint(3, 8) * random.choice([-1, 1])
+            overshoot_y = y1 + random.randint(2, 5) * random.choice([-1, 1])
+            path.extend([
+                (overshoot_x, overshoot_y),
+                (overshoot_x + random.randint(-2, 2), overshoot_y + random.randint(-1, 1)),
+                (x1 + random.randint(-1, 1), y1 + random.randint(-1, 1)),
+            ])
+            
         return path
 
 
@@ -165,11 +141,18 @@ class HumanScroller:
                 ],
                 weights=[40, 35, 20, 5],
             )[0]
+            
+            if random.random() < 0.05:
+                distance = int(distance * random.uniform(2.0, 3.0))
+                
             steps = max(3, abs(distance) // 50)
             per_step = distance / steps
-            for _ in range(steps):
+            for i in range(steps):
+                t = i / max(steps - 1, 1)
+                ease = math.sin(t * math.pi)
+                step_delay = 0.01 + 0.06 * (1 - ease) + random.gauss(0, 0.006)
                 await self._page.mouse.wheel(0, per_step)
-                await asyncio.sleep(random.uniform(0.02, 0.08))
+                await asyncio.sleep(max(0.007, step_delay))
             self.total_scrolled += distance
             count += 1
 
@@ -421,10 +404,6 @@ class WarmupSession:
                 "playwright is required. Run: pip install playwright && "
                 "playwright install chromium"
             ) from exc
-        try:
-            from playwright_stealth import stealth_async
-        except ImportError:
-            stealth_async = None
 
         profile = BrowserProfile()
         async with async_playwright() as p:
@@ -434,14 +413,49 @@ class WarmupSession:
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
                     "--no-default-browser-check",
+                    "--disable-infobars",
+                    "--disable-dev-shm-usage",
+                    "--disable-plugins-discovery",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                    "--disable-sync",
+                    "--disable-translate",
+                    "--hide-scrollbars",
+                    "--metrics-recording-only",
+                    "--mute-audio",
+                    "--safebrowsing-disable-auto-update",
+                    "--ignore-certificate-errors",
+                    "--ignore-ssl-errors",
                 ],
                 proxy={"server": self._proxy_url} if self._proxy_url else None,
             )
             context = await browser.new_context(**profile.to_context_kwargs())
             page = await context.new_page()
 
-            if stealth_async:
-                await stealth_async(page)
+            await stealth_async(page)
+            
+            await page.add_init_script(f"""
+                Object.defineProperty(navigator, 'platform', {{
+                    get: () => '{profile.platform}'
+                }});
+                Object.defineProperty(navigator, 'languages', {{
+                    get: () => ['{profile.locale}', '{profile.locale.split('-')[0]}', 'en-US', 'en']
+                }});
+                Object.defineProperty(navigator, 'hardwareConcurrency', {{
+                    get: () => {profile.hardware_concurrency}
+                }});
+                Object.defineProperty(navigator, 'deviceMemory', {{
+                    get: () => {profile.device_memory}
+                }});
+                window.chrome = {{
+                    runtime: {{}},
+                    loadTimes: function() {{}},
+                    csi: function() {{}},
+                    app: {{}}
+                }};
+            """)
 
             # Inject browser cookies
             await context.add_cookies([

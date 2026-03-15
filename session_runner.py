@@ -19,7 +19,6 @@ from rich.table import Table
 import config
 from exceptions import ChallengeError, RateLimitError
 from visit import Visit
-from web_session import WebSession
 
 console = Console()
 
@@ -42,14 +41,18 @@ class SessionRunner:
         total_posts: int,
         session: dict,
         cookies: dict,
+        progress_file: str | None = None,
+        visit_min_posts: int | None = None,
+        visit_max_posts: int | None = None,
     ) -> None:
         self.target_username = target_username
         self.total_posts = total_posts
         self.session = session
         self.cookies = cookies
-        self.progress_file = Path(config.STALK_PROGRESS_FILE)
+        self.progress_file = Path(progress_file or config.STALK_PROGRESS_FILE)
+        self.visit_min = visit_min_posts or config.STALK_VISIT_MIN_POSTS
+        self.visit_max = visit_max_posts or config.STALK_VISIT_MAX_POSTS
         self.progress = self._load_progress()
-        self.web_session = WebSession(cookies)
         self.visit_plans: list[VisitPlan] = []
         self._hydrate_visit_plans()
 
@@ -57,7 +60,7 @@ class SessionRunner:
     # Main entry point
     # ------------------------------------------------------------------
 
-    async def run(self) -> None:
+    async def run(self, max_visits: int | None = None) -> None:
         """Drive the full 5-hour stalking session."""
         console.print()
         console.rule(f"Stalk Session — {self.target_username}", style="bold cyan")
@@ -105,12 +108,19 @@ class SessionRunner:
         # Execute all visits
         try:
             start_index = int(self.progress.get("visits_completed", 0))
+            visits_run = 0
+            
             for plan in self.visit_plans[start_index:]:
                 if self.progress["posts_collected"] >= self.total_posts:
                     break
+                    
+                if max_visits is not None and visits_run >= max_visits:
+                    console.print(f"[dim]Reached max visits limit ({max_visits}). Pause.[/]")
+                    return
 
                 console.print(f"\n[bold]Starting Visit {plan.visit_number} ...[/]")
                 posts_this_visit = await self._execute_visit(plan)
+                visits_run += 1
                 console.print(
                     f"[green]Visit {plan.visit_number} done[/] — {posts_this_visit} posts collected. "
                     f"Sleeping {plan.gap_after_minutes:.0f} min."
@@ -147,7 +157,6 @@ class SessionRunner:
         visit = Visit(
             plan=plan,
             cookies=self.cookies,
-            web_session=self.web_session,
             progress=self.progress,
             target_username=self.target_username,
             on_page_done=self._on_page_done,
@@ -173,7 +182,7 @@ class SessionRunner:
             if posts_left == 0:
                 self.visit_plans = []
                 return
-            num_visits = 1 if posts_left <= config.STALK_VISIT_MAX_POSTS else random.randint(2, 4)
+            num_visits = 1 if posts_left <= self.visit_max else random.randint(2, 4)
 
         self.visit_plans = []
 
@@ -183,9 +192,7 @@ class SessionRunner:
                 posts_target = posts_left
             else:
                 # Other visits get random target
-                posts_target = random.randint(
-                    config.STALK_VISIT_MIN_POSTS, config.STALK_VISIT_MAX_POSTS
-                )
+                posts_target = random.randint(self.visit_min, self.visit_max)
                 posts_target = min(posts_target, posts_left)
                 posts_left -= posts_target
 
