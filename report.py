@@ -81,39 +81,10 @@ def _section_collection_summary(stats: dict, report: dict) -> None:
     report["hashtag_breakdown"] = stats["hashtag_counts"]
 
 
-def _section_sentiment(stats: dict, report: dict) -> None:
-    dist = stats["sentiment_distribution"]
-    total = sum(dist.values())
-
-    table = Table(box=box.SIMPLE)
-    table.add_column("Sentiment", style="bold")
-    table.add_column("Posts", justify="right")
-    table.add_column("% of analyzed", justify="right")
-
-    colors = {"positive": "green", "negative": "red", "neutral": "yellow"}
-    for label in ("positive", "negative", "neutral"):
-        cnt = dist.get(label, 0)
-        color = colors.get(label, "white")
-        table.add_row(f"[{color}]{label}[/{color}]", str(cnt), _pct(cnt, total))
-
-    console.print(Panel(table, title="[bold]2. Sentiment Distribution (Posts)", border_style="blue"))
-
-    if stats["total_comments"] == 0 and "public" in stats.get("scrape_modes", {}):
-        console.print(
-            "[dim italic]Comments not available in public mode. "
-            "Run with [bold]--auth[/] for full data including comments.[/dim italic]\n"
-        )
-
-    report["sentiment_distribution"] = {
-        k: {"count": dist.get(k, 0), "pct": _pct(dist.get(k, 0), total)}
-        for k in ("positive", "negative", "neutral")
-    }
-
-
-def _section_top_posts(report: dict) -> None:
+def _section_themes(report: dict) -> None:
     with storage._conn() as conn:
         rows = conn.execute(
-            """SELECT username, caption, like_count, comment_count, sentiment_label, sentiment_score
+            """SELECT username, caption, like_count, comment_count
                FROM posts
                ORDER BY (like_count + comment_count) DESC
                LIMIT 10"""
@@ -125,24 +96,19 @@ def _section_top_posts(report: dict) -> None:
     table.add_column("Caption (truncated)", max_width=60)
     table.add_column("Likes", justify="right")
     table.add_column("Cmts", justify="right")
-    table.add_column("Sentiment", justify="center")
 
     top_posts_data = []
     for i, r in enumerate(rows, 1):
-        sentiment = r["sentiment_label"] or "—"
-        colors = {"positive": "green", "negative": "red", "neutral": "yellow"}
-        color = colors.get(sentiment, "white")
         table.add_row(
             str(i),
             r["username"] or "—",
             _truncate(r["caption"], 120),
             str(r["like_count"] or 0),
             str(r["comment_count"] or 0),
-            f"[{color}]{sentiment}[/{color}]",
         )
         top_posts_data.append(dict(r))
 
-    console.print(Panel(table, title="[bold]3. Top 10 Engaged Posts", border_style="blue"))
+    console.print(Panel(table, title="[bold]2. Top 10 Engaged Posts", border_style="blue"))
     report["top_posts"] = top_posts_data
 
 
@@ -161,66 +127,12 @@ def _section_themes(report: dict) -> None:
     for kw, cnt in counts.most_common():
         table.add_row(kw, str(cnt))
 
-    console.print(Panel(table, title="[bold]4. Most Discussed Themes (Brand Keywords)", border_style="blue"))
+    console.print(Panel(table, title="[bold]3. Most Discussed Themes (Brand Keywords)", border_style="blue"))
     report["themes"] = dict(counts.most_common())
 
 
-def _section_sentiment_by_hashtag(report: dict) -> None:
-    with storage._conn() as conn:
-        rows = conn.execute(
-            """SELECT source_hashtag,
-                      AVG(CASE WHEN sentiment_label='positive' THEN 1
-                               WHEN sentiment_label='negative' THEN -1
-                               ELSE 0 END) as avg_score,
-                      COUNT(*) as cnt
-               FROM posts
-               WHERE sentiment_label IS NOT NULL
-               GROUP BY source_hashtag
-               ORDER BY avg_score DESC"""
-        ).fetchall()
-
-    table = Table(box=box.SIMPLE)
-    table.add_column("Hashtag", style="cyan")
-    table.add_column("Posts", justify="right")
-    table.add_column("Avg Sentiment", justify="right")
-
-    ht_data = {}
-    for r in rows:
-        score = r["avg_score"] or 0
-        color = "green" if score > 0.1 else "red" if score < -0.1 else "yellow"
-        table.add_row(
-            f"#{r['source_hashtag']}",
-            str(r["cnt"]),
-            f"[{color}]{score:+.3f}[/{color}]",
-        )
-        ht_data[r["source_hashtag"]] = {"posts": r["cnt"], "avg_sentiment": round(score, 4)}
-
-    console.print(Panel(table, title="[bold]5. Sentiment by Source", border_style="blue"))
-    report["sentiment_by_hashtag"] = ht_data
 
 
-def _section_sample_voices(report: dict) -> None:
-    with storage._conn() as conn:
-        pos = conn.execute(
-            "SELECT caption FROM posts WHERE sentiment_label='positive' ORDER BY RANDOM() LIMIT 3"
-        ).fetchall()
-        neg = conn.execute(
-            "SELECT caption FROM posts WHERE sentiment_label='negative' ORDER BY RANDOM() LIMIT 3"
-        ).fetchall()
-
-    pos_texts = [_truncate(r[0]) for r in pos]
-    neg_texts = [_truncate(r[0]) for r in neg]
-
-    content = ""
-    content += "[bold green]✦ Positive voices[/]\n"
-    for t in pos_texts or ["[dim]No positive posts yet[/dim]"]:
-        content += f"  • {t}\n"
-    content += "\n[bold red]✦ Negative voices[/]\n"
-    for t in neg_texts or ["[dim]No negative posts yet[/dim]"]:
-        content += f"  • {t}\n"
-
-    console.print(Panel(content, title="[bold]6. Sample Voices", border_style="blue"))
-    report["sample_voices"] = {"positive": pos_texts, "negative": neg_texts}
 
 
 # ---------------------------------------------------------------------------
@@ -255,11 +167,8 @@ def generate_report() -> dict:
         return report
 
     _section_collection_summary(stats, report)
-    _section_sentiment(stats, report)
     _section_top_posts(report)
     _section_themes(report)
-    _section_sentiment_by_hashtag(report)
-    _section_sample_voices(report)
 
     # Mode notice
     if "public" in stats.get("scrape_modes", {}) and stats["total_comments"] == 0:

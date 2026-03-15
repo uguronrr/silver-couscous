@@ -118,9 +118,36 @@ WARMUP_LIKE_PROBABILITY = 0.15
 WARMUP_EXPLORE_PROBABILITY = 0.4
 
 # ---------------------------------------------------------------------------
-# Sentiment model
+# Tag discovery — search queries to find brand-related hashtags
 # ---------------------------------------------------------------------------
 
-SENTIMENT_MODEL = "cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual"
-SENTIMENT_BATCH_SIZE = 32
-MAX_TOKEN_LENGTH = 512
+TAG_DISCOVERY_QUERIES = {
+    "Arçelik": [
+        "arçelik", "arcelik beyaz eşya", "arçelik çamaşır",
+        "arçelik bulaşık makinesi", "arçelik klima",
+    ],
+    "Castrol": [
+        "castrol", "castrol yağ", "castrol edge",
+        "castrol magnatec", "motor yağı castrol",
+    ],
+    "Karaca": [
+        "karaca", "karaca yemek takımı", "karaca mutfak",
+        "karaca bardak", "karaca tencere", "karaca airfryer",
+    ],
+}
+
+# Posts to fetch per discovered hashtag (secondary source, keep conservative)
+POSTS_PER_DISCOVERED_TAG = 15
+
+# ---------------------------------------------------------------------------
+# Stalk session settings — human-paced profile scraping
+# ---------------------------------------------------------------------------
+
+STALK_TARGET = os.environ.get("STALK_TARGET", "castrolturkiye")
+STALK_TOTAL_POSTS = int(os.environ.get("STALK_TOTAL_POSTS", "1004"))
+STALK_PROGRESS_FILE = "data/stalk_progress.json"
+POSTS_PER_ACCOUNT = 1200        # raise from 30 for pagination
+STALK_VISIT_MIN_POSTS = 120
+STALK_VISIT_MAX_POSTS = 220
+STALK_GAP_MIN_MINUTES = 25.0
+STALK_GAP_MAX_MINUTES = 50.0

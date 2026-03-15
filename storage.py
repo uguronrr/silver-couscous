@@ -31,8 +31,6 @@ def init_db() -> None:
                 source_hashtag TEXT,
                 brand         TEXT,
                 scrape_mode   TEXT,
-                sentiment_label TEXT,
-                sentiment_score REAL,
                 scraped_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -44,8 +42,6 @@ def init_db() -> None:
                 text          TEXT,
                 created_at    TIMESTAMP,
                 like_count    INTEGER,
-                sentiment_label TEXT,
-                sentiment_score REAL,
                 scraped_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (media_id) REFERENCES posts(media_id)
             );
@@ -117,40 +113,15 @@ def save_comments(comments: list[dict]) -> int:
     return len(rows)
 
 
+
 # ---------------------------------------------------------------------------
 # Read
 # ---------------------------------------------------------------------------
 
-def get_unanalyzed_posts() -> list[dict]:
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT media_id, caption FROM posts WHERE sentiment_label IS NULL AND caption IS NOT NULL"
-        ).fetchall()
-    return [dict(r) for r in rows]
 
 
-def get_unanalyzed_comments() -> list[dict]:
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT comment_id, text FROM comments WHERE sentiment_label IS NULL AND text IS NOT NULL"
-        ).fetchall()
-    return [dict(r) for r in rows]
 
 
-# ---------------------------------------------------------------------------
-# Update
-# ---------------------------------------------------------------------------
-
-def update_sentiment(
-    table: str,
-    id_field: str,
-    id_value: str,
-    label: str,
-    score: float,
-) -> None:
-    sql = f"UPDATE {table} SET sentiment_label = ?, sentiment_score = ? WHERE {id_field} = ?"
-    with _conn() as conn:
-        conn.execute(sql, (label, score, id_value))
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +142,6 @@ def get_stats() -> dict:
             "SELECT COUNT(DISTINCT user_id) FROM posts"
         ).fetchone()[0]
 
-        sentiment_posts = conn.execute(
-            """SELECT sentiment_label, COUNT(*) as cnt
-               FROM posts WHERE sentiment_label IS NOT NULL
-               GROUP BY sentiment_label"""
-        ).fetchall()
 
         hashtag_counts = conn.execute(
             "SELECT source_hashtag, COUNT(*) as cnt FROM posts GROUP BY source_hashtag ORDER BY cnt DESC"
@@ -195,7 +161,6 @@ def get_stats() -> dict:
         "earliest_post": earliest,
         "latest_post": latest,
         "unique_users": unique_users,
-        "sentiment_distribution": {r[0]: r[1] for r in sentiment_posts},
         "hashtag_counts": {r[0]: r[1] for r in hashtag_counts},
         "scrape_modes": {r[0]: r[1] for r in scrape_modes},
         "brand_counts": {r[0]: r[1] for r in brand_counts},

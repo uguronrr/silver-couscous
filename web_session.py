@@ -8,6 +8,7 @@ Proxy pinning: every request goes through the proxy assigned to this session.
 """
 
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from urllib.parse import unquote
 
@@ -47,11 +48,19 @@ class WebSession:
         for k, v in cookies.items():
             self._s.cookies.set(k, unquote(str(v)), domain=".instagram.com", path="/")
 
+        # Store user_id from ds_user_id cookie for use in health check
+        self._user_id = str(cookies.get("ds_user_id", ""))
+
         self._s.headers.update({
             "x-ig-app-id": self.APP_ID,
             "x-csrftoken": cookies.get("csrftoken", ""),
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/133.0.0.0 Safari/537.36"
+            ),
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
             "sec-fetch-site": "same-origin",
@@ -106,14 +115,18 @@ class WebSession:
         return user["id"]
 
     def get_user_posts(
-        self, username: str, brand: str
+        self, username: str, brand: str, max_posts: int | None = None,
+        resume_cursor: str | None = None
     ) -> tuple[list[dict], list[dict]]:
         """Fetch posts + comments for an Instagram account.
 
         Strategy:
           1. web_profile_info → user_id + maybe GraphQL edges (first ~12 posts)
-          2. If edges empty → /api/v1/feed/user/{user_id}/ (V1 format, more posts)
+          2. If edges empty or max_posts > 12 → fetch_profile_pages for pagination
         """
+        if max_posts is None:
+            max_posts = config.POSTS_PER_ACCOUNT
+
         data = self.get(
             "/api/v1/users/web_profile_info/",
             params={"username": username},
@@ -126,12 +139,14 @@ class WebSession:
         user_id = user.get("id", "")
         edges = user.get("edge_owner_to_timeline_media", {}).get("edges", [])
 
-        if edges:
-            return self._parse_graphql_edges(edges, user_id, username, brand)
+        if edges and max_posts <= 12:
+            return self._parse_graphql_edges(edges[:max_posts], user_id, username, brand)
 
-        # Edges empty — fall back to V1 feed endpoint
-        console.print("[dim](web_profile_info returned no edges → feed/user fallback)[/]", end=" ")
-        return self._fetch_v1_feed(user_id, username, brand)
+        # Need pagination or edges empty — use fetch_profile_pages
+        console.print("[dim](using pagination)[/]", end=" ")
+        return self.fetch_profile_pages(
+            user_id, username, brand, max_posts, resume_cursor
+        )
 
     def _parse_graphql_edges(
         self, edges: list, user_id: str, username: str, brand: str
@@ -158,37 +173,166 @@ class WebSession:
             human_delay(0.8, 2.0)
         return posts_out, comments_out
 
-    def _fetch_v1_feed(
-        self, user_id: str, username: str, brand: str
-    ) -> tuple[list[dict], list[dict]]:
-        """GET /api/v1/feed/user/{user_id}/ — V1-format post objects."""
-        human_delay(1, 2)
-        resp_data = self.get(
-            f"/api/v1/feed/user/{user_id}/",
-            params={"count": config.POSTS_PER_ACCOUNT},
-            headers={"Referer": f"{self.BASE}/{username}/"},
-        )
-        items = resp_data.get("items", [])
+    def fetch_profile_pages(
+        self,
+        user_id: str,
+        username: str,
+        brand: str,
+        max_posts: int,
+        resume_cursor: str | None = None,
+        on_page_done: Callable | None = None,
+    ) -> tuple[list[dict], list[dict], str | None]:
+        """Fetch profile posts with human-like scroll rhythm.
+
+        Returns (posts, comments, next_cursor).
+        Implements per-page behavioral states:
+        - Glance (50%): quick scroll
+        - Read (35%): with optional comment fetches
+        - Distraction (15%): long pause
+        Includes partial page collection, back-scrolls, and noise requests.
+        """
+        import random
+        from timing import human_delay
+
         posts_out: list[dict] = []
         comments_out: list[dict] = []
-        for item in items:
-            caption = (item.get("caption") or {}).get("text", "") or ""
-            media_id = str(item.get("pk") or item.get("id", ""))
-            post = _make_post(
-                media_id=media_id,
-                user_id=str((item.get("user") or {}).get("pk", user_id)),
-                username=username,
-                caption=caption,
-                like_count=item.get("like_count", 0),
-                comment_count=item.get("comment_count", 0),
-                taken_at=item.get("taken_at", 0),
-                is_video=(item.get("media_type", 1) == 2),
-                brand=brand,
+        next_cursor = resume_cursor
+
+        page_count = 0
+        pages_since_break = 0
+        prev_page_media_ids: list[str] = []
+
+        while len(posts_out) < max_posts:
+            # Mandatory rhythm break every 3–6 pages
+            if pages_since_break > 0 and pages_since_break >= random.randint(3, 6):
+                console.print(f"  [dim](mandatory break)[/]")
+                human_delay(random.uniform(45, 110))
+                pages_since_break = 0
+
+            # Draw behavioral state for this page
+            state = random.choices(
+                ["glance", "read", "distraction"],
+                weights=[0.50, 0.35, 0.15],
+            )[0]
+
+            # Apply scroll state delay
+            if state == "glance":
+                delay = random.uniform(2, 6)
+            elif state == "read":
+                delay = random.uniform(8, 20)
+            else:  # distraction
+                delay = random.uniform(45, 110)
+
+            human_delay(delay, delay)
+
+            # Occasional back-scroll (12% chance)
+            if prev_page_media_ids and random.random() < 0.12:
+                media_id = random.choice(prev_page_media_ids)
+                try:
+                    self.get_comments(media_id, username)
+                    console.print(f"  [dim](back-scroll)[/]")
+                except (ChallengeError, RateLimitError):
+                    raise
+                except Exception:
+                    pass
+
+            # Noise requests (8% chance)
+            if random.random() < 0.08:
+                try:
+                    if random.random() < 0.5:
+                        self.get("/api/v1/feed/timeline/")
+                    else:
+                        self.get("/api/v1/news/inbox/")
+                except (ChallengeError, RateLimitError):
+                    raise
+                except Exception:
+                    pass
+
+            # Fetch next page
+            params = {"count": 12}
+            if next_cursor:
+                params["max_id"] = next_cursor
+
+            resp_data = self.get(
+                f"/api/v1/feed/user/{user_id}/",
+                params=params,
+                headers={"Referer": f"{self.BASE}/{username}/"},
             )
-            posts_out.append(post)
-            comments_out.extend(self.get_comments(media_id, username))
-            human_delay(0.8, 2.0)
-        return posts_out, comments_out
+
+            items = resp_data.get("items", [])
+            if not items:
+                break
+
+            # Partial page collection (15% chance take subset)
+            if random.random() < 0.15 and len(items) > 5:
+                items = items[:random.randint(5, 10)]
+
+            # Parse items
+            page_media_ids = []
+            page_posts: list[dict] = []
+            page_comments: list[dict] = []
+            for item in items:
+                if len(posts_out) >= max_posts:
+                    break
+
+                caption = (item.get("caption") or {}).get("text", "") or ""
+                media_id = str(item.get("pk") or item.get("id", ""))
+                post = _make_post(
+                    media_id=media_id,
+                    user_id=str((item.get("user") or {}).get("pk", user_id)),
+                    username=username,
+                    caption=caption,
+                    like_count=item.get("like_count", 0),
+                    comment_count=item.get("comment_count", 0),
+                    taken_at=item.get("taken_at", 0),
+                    is_video=(item.get("media_type", 1) == 2),
+                    brand=brand,
+                )
+                posts_out.append(post)
+                page_posts.append(post)
+                page_media_ids.append(media_id)
+
+                # Conditionally fetch comments (45% if read state)
+                if state == "read" and random.random() < 0.45:
+                    num_posts_to_fetch = random.randint(1, 2)
+                    for _ in range(min(num_posts_to_fetch, len(page_media_ids))):
+                        m_id = random.choice(page_media_ids)
+                        fetched_comments = self.get_comments(m_id, username)
+                        comments_out.extend(fetched_comments)
+                        page_comments.extend(fetched_comments)
+
+                # Conditionally fetch media info (20% if read state)
+                if state == "read" and random.random() < 0.20:
+                    try:
+                        self.get(f"/api/v1/media/{media_id}/info/")
+                    except (ChallengeError, RateLimitError):
+                        raise
+                    except Exception:
+                        pass
+
+            page_count += 1
+            pages_since_break += 1
+            prev_page_media_ids = page_media_ids
+
+            # Print page summary
+            console.print(
+                f"  page {page_count}  {state:13s}  {len(items):2d} posts   "
+                f"({len(posts_out)} total)"
+                + (" [comments fetched]" if state == "read" and random.random() < 0.45 else "")
+                + (" [partial page]" if random.random() < 0.15 else "")
+            )
+
+            next_cursor = resp_data.get("next_max_id")
+            more_available = resp_data.get("more_available", False)
+
+            # Callback after page
+            if on_page_done:
+                on_page_done(page_posts, page_comments, next_cursor, len(posts_out))
+
+            if not next_cursor or not more_available:
+                break
+
+        return posts_out, comments_out, next_cursor
 
     def get_comments(self, media_id: str, username: str) -> list[dict]:
         """Fetch comments for a single post. Returns [] on any failure."""
@@ -224,7 +368,8 @@ class WebSession:
     def health_check(self) -> bool:
         """Lightweight endpoint to verify session is still valid."""
         try:
-            self.get("/api/v1/accounts/current_user/", params={"edit": "false"})
+            user_id = self._user_id or "43550448512"
+            self.get(f"/api/v1/users/{user_id}/info/")
             return True
         except (SessionExpiredError, ChallengeError):
             return False

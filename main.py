@@ -3,9 +3,8 @@
 Usage:
     python main.py scrape                           # Run orchestrator (session pool)
     python main.py scrape --legacy --auth           # Legacy single-session path
-    python main.py analyze                          # Sentiment analysis
     python main.py report                           # Generate report
-    python main.py full                             # scrape + analyze + report
+    python main.py full                             # scrape + report
     python main.py warmup [--type normal|initial|minimal] [--accounts id1,id2]
     python main.py sessions list
     python main.py sessions add
@@ -53,11 +52,6 @@ def cmd_scrape(args: argparse.Namespace) -> None:
 # analyze / report / full
 # ---------------------------------------------------------------------------
 
-def cmd_analyze(_args: argparse.Namespace) -> None:
-    import analyzer
-    analyzer.run_full_analysis()
-
-
 def cmd_report(_args: argparse.Namespace) -> None:
     import report
     report.generate_report()
@@ -65,7 +59,6 @@ def cmd_report(_args: argparse.Namespace) -> None:
 
 def cmd_full(args: argparse.Namespace) -> None:
     cmd_scrape(args)
-    cmd_analyze(args)
     cmd_report(args)
 
 
@@ -81,6 +74,32 @@ def cmd_warmup(args: argparse.Namespace) -> None:
     pool = SessionPool()
     account_ids = args.accounts.split(",") if getattr(args, "accounts", None) else None
     asyncio.run(run_warmup(pool, session_type=args.type, account_ids=account_ids))
+
+
+# ---------------------------------------------------------------------------
+# stalk — human-paced profile stalker
+# ---------------------------------------------------------------------------
+
+def cmd_stalk(args: argparse.Namespace) -> None:
+    import asyncio
+    import json
+    from session_pool import SessionPool
+    from session_runner import SessionRunner
+
+    pool = SessionPool()
+    session = pool.get_next_session()
+    if not session:
+        console.print("[red]No active sessions in pool. Run: python main.py sessions add[/]")
+        sys.exit(1)
+
+    cookies = json.loads(session["cookies_json"])
+    runner = SessionRunner(
+        target_username=args.target,
+        total_posts=args.total,
+        session=session,
+        cookies=cookies,
+    )
+    asyncio.run(runner.run())
 
 
 # ---------------------------------------------------------------------------
@@ -245,14 +264,11 @@ def build_parser() -> argparse.ArgumentParser:
                           help="(legacy) Use authenticated mode")
     p_scrape.add_argument("--proxy", metavar="URL")
 
-    # analyze
-    sub.add_parser("analyze", help="Run sentiment analysis on unanalyzed data")
-
     # report
     sub.add_parser("report", help="Generate the summary report")
 
     # full
-    p_full = sub.add_parser("full", help="scrape + analyze + report")
+    p_full = sub.add_parser("full", help="scrape + report")
     p_full.add_argument("--legacy", action="store_true")
     p_full.add_argument("--auth", action="store_true")
     p_full.add_argument("--proxy", metavar="URL")
@@ -266,6 +282,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--accounts", metavar="IDS",
         help="Comma-separated account IDs (default: all active)"
     )
+
+    # stalk — human-paced profile stalker
+    p_stalk = sub.add_parser("stalk", help="Human-paced full profile scrape")
+    p_stalk.add_argument("--target", default=config.STALK_TARGET,
+                         help=f"Target username (default: {config.STALK_TARGET})")
+    p_stalk.add_argument("--total", type=int, default=config.STALK_TOTAL_POSTS,
+                         help=f"Total posts to collect (default: {config.STALK_TOTAL_POSTS})")
 
     # sessions
     p_sess = sub.add_parser("sessions", help="Manage session pool")
@@ -300,10 +323,10 @@ def main() -> None:
 
     dispatch = {
         "scrape": cmd_scrape,
-        "analyze": cmd_analyze,
         "report": cmd_report,
         "full": cmd_full,
         "warmup": cmd_warmup,
+        "stalk": cmd_stalk,
         "sessions": cmd_sessions,
         "stats": cmd_stats,
         "export": cmd_export,

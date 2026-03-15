@@ -1,50 +1,15 @@
 {
-    "uuids": {
-        "phone_id": "3e66b641-cb65-4a82-b4c7-8dd93b519b6f",
-        "uuid": "1daabc5d-6076-4ef3-a72f-9fec1cbb7936",
-        "client_session_id": "b2f30e53-03a4-41df-88d5-d3cc4d5bccbe",
-        "advertising_id": "ce88c6fb-7fe2-4a1e-8f8e-012ed85c6070",
-        "android_device_id": "android-ef3d6c2adfb84282",
-        "request_id": "d269d386-2909-4117-810a-13ee6c4f344f",
-        "tray_session_id": "61b9e17d-6e9a-4970-a8e9-3ef1ec4077aa"
-    },
-    "mid": null,
-    "ig_u_rur": null,
-    "ig_www_claim": null,
-    "authorization_data": {
-        "ds_user_id": "43550448512",
-        "sessionid": "43550448512:R8wGsheb7AEqnI:11:AYhZSCp6ZAurNlXdFtaUfMHh93qmoz6DTc6uA_9rTw",
-        "should_use_header_over_cookies": true
-    },
-    "cookies": {
-        "sessionid": "43550448512:R8wGsheb7AEqnI:11:AYhZSCp6ZAurNlXdFtaUfMHh93qmoz6DTc6uA_9rTw",
-        "ds_user_id": "43550448512",
-        "datr": "nawPaR1kjimGbWodHUVkq_S9",
-        "ig_did": "10958384-6F8B-49C0-8DC4-7E65162A0FE7",
-        "mid": "aQ-sogAEAAFiPB6JEdhUsdPCvxmm",
-        "ig_nrcb": "1",
-        "ps_l": "1",
-        "ps_n": "1",
-        "csrftoken": "tejzKDxhyVj1GontNa35NtXsMfqkfHja",
-        "wd": "885x788",
-        "rur": "\"RVA\\05443550448512\\0541804665733:01fec576aa9af3c7f10d6075158a9dfe8a323c1d0d75d4001834f901cb1fd132bac3a413\""
-    },
-    "last_login": null,
-    "device_settings": {
-        "app_version": "269.0.0.18.75",
-        "android_version": 33,
-        "android_release": "13.0",
-        "dpi": "420dpi",
-        "resolution": "1080x2340",
-        "manufacturer": "samsung",
-        "device": "SM-S911B",
-        "model": "SM-S911B",
-        "cpu": "snapdragon8gen2",
-        "version_code": "314665256"
-    },
-    "user_agent": "Instagram 269.0.0.18.75 Android (26/8.0.0; 480dpi; 1080x1920; OnePlus; 6T Dev; devitron; qcom; en_US; 314665256)",
-    "country": "US",
-    "country_code": 1,
-    "locale": "en_US",
-    "timezone_offset": -14400
+  "cookies": {
+    "csrftoken": "tejzKDxhyVj1GontNa35NtXsMfqkfHja",
+    "datr": "nawPaR1kjimGbWodHUVkq_S9",
+    "ds_user_id": "43550448512",
+    "ig_did": "10958384-6F8B-49C0-8DC4-7E65162A0FE7",
+    "ig_nrcb": "1",
+    "mid": "aQ-sogAEAAFiPB6JEdhUsdPCvxmm",
+    "ps_l": "1",
+    "ps_n": "1",
+    "rur": "\"RVA\\05443550448512\\0541805130682:01feb2ccec2cee08c411f779cbb3f5325ebad822b1e9120d5ba2d549ef676dfcdfb88033\"",
+    "sessionid": "43550448512%3AXNcPw0FyNYbaYz%3A9%3AAYjwg-_HMPjessxOxHhUml6tr5yN18OsClFezk-Ezw",
+    "wd": "567x788"
+  }
 }
