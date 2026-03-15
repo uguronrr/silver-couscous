@@ -187,6 +187,38 @@ class WebSession:
             node = edge["node"]
             cap_edges = node.get("edge_media_to_caption", {}).get("edges", [])
             caption = cap_edges[0]["node"]["text"] if cap_edges else ""
+            
+            # Extract tagged users
+            tagged = []
+            for t in node.get("edge_media_to_tagged_user", {}).get("edges", []):
+                if u := t.get("node", {}).get("user", {}).get("username"):
+                    tagged.append(u)
+
+            # Carousel count
+            carousel_count = 0
+            carousel_children = []
+            if children := node.get("edge_sidecar_to_children", {}).get("edges"):
+                carousel_count = len(children)
+                for child_edge in children:
+                    c_node = child_edge["node"]
+                    c_video = c_node.get("video_url")
+                    c_img = c_node.get("display_url")
+                    c_type = "video" if c_node.get("is_video") else "image"
+                    
+                    c_url = c_video if c_type == "video" else c_img
+                    
+                    if c_url:
+                        carousel_children.append({
+                            "type": c_type,
+                            "url": c_url,
+                            "thumbnail_url": c_img,
+                            "width": c_node.get("dimensions", {}).get("width"),
+                            "height": c_node.get("dimensions", {}).get("height"),
+                            "id": c_node.get("id")
+                        })
+                
+            loc = node.get("location") or {}
+            
             post = _make_post(
                 media_id=node["id"],
                 user_id=user_id,
@@ -197,6 +229,23 @@ class WebSession:
                 taken_at=node.get("taken_at_timestamp", 0),
                 is_video=node.get("is_video", False),
                 brand=brand,
+                image_url=node.get("display_url"),
+                video_url=node.get("video_url"),
+                thumbnail_url=node.get("display_resources", [{}])[0].get("src"),
+                media_width=node.get("dimensions", {}).get("width"),
+                media_height=node.get("dimensions", {}).get("height"),
+                play_count=node.get("video_play_count"),
+                view_count=node.get("video_view_count"),
+                carousel_count=carousel_count,
+                location_name=loc.get("name"),
+                location_lat=None, # GraphQL usually doesn't give lat/lng easily here
+                location_lng=None,
+                tagged_users=tagged,
+                accessibility_caption=node.get("accessibility_caption"),
+                is_paid_partnership=node.get("is_paid_partnership", False),
+                product_type=node.get("product_type"),
+                shortcode=node.get("shortcode"),
+                carousel_children=carousel_children,
             )
             posts_out.append(post)
             comments_out.extend(self.get_comments(node["id"], username))
@@ -306,6 +355,76 @@ class WebSession:
 
                 caption = (item.get("caption") or {}).get("text", "") or ""
                 media_id = str(item.get("pk") or item.get("id", ""))
+                
+                # Extract extended metadata
+                image_url = None
+                video_url = None
+                width = None
+                height = None
+                
+                # Best image
+                if item.get("image_versions2"):
+                    candidates = item["image_versions2"].get("candidates", [])
+                    if candidates:
+                        image_url = candidates[0]["url"]
+                        width = candidates[0]["width"]
+                        height = candidates[0]["height"]
+                        
+                # Video
+                if item.get("video_versions"):
+                    video_url = item["video_versions"][0]["url"]
+                
+                # Carousel
+                carousel_count = item.get("carousel_media_count")
+                carousel_children = []
+                if item.get("carousel_media"):
+                    if not carousel_count:
+                        carousel_count = len(item["carousel_media"])
+                    for child in item["carousel_media"]:
+                        c_url = None
+                        c_thumb = None
+                        c_type = "image"
+                        w, h = None, None
+                        
+                        # Always get image/thumbnail
+                        if child.get("image_versions2"):
+                            cands = child["image_versions2"].get("candidates", [])
+                            if cands:
+                                c_thumb = cands[0]["url"]
+                                w = cands[0]["width"]
+                                h = cands[0]["height"]
+                        
+                        # Get video if present
+                        if child.get("video_versions"):
+                            c_url = child["video_versions"][0]["url"]
+                            c_type = "video"
+                        else:
+                            # If no video, the image is the main url
+                            c_url = c_thumb
+
+                        if c_url:
+                            carousel_children.append({
+                                "type": c_type,
+                                "url": c_url,
+                                "thumbnail_url": c_thumb,
+                                "width": w,
+                                "height": h,
+                                "id": str(child.get("pk", ""))
+                            })
+                
+                # Location
+                loc = item.get("location") or {}
+                location_name = loc.get("name")
+                location_lat = loc.get("lat")
+                location_lng = loc.get("lng")
+                
+                # Tags
+                tagged = []
+                if item.get("usertags"):
+                    for t in item["usertags"].get("in", []):
+                        if u := t.get("user", {}).get("username"):
+                            tagged.append(u)
+
                 post = _make_post(
                     media_id=media_id,
                     user_id=str((item.get("user") or {}).get("pk", user_id)),
@@ -316,6 +435,22 @@ class WebSession:
                     taken_at=item.get("taken_at", 0),
                     is_video=(item.get("media_type", 1) == 2),
                     brand=brand,
+                    image_url=image_url,
+                    video_url=video_url,
+                    media_width=width,
+                    media_height=height,
+                    play_count=item.get("play_count"),
+                    view_count=item.get("view_count"),
+                    carousel_count=carousel_count,
+                    location_name=location_name,
+                    location_lat=location_lat,
+                    location_lng=location_lng,
+                    tagged_users=tagged,
+                    accessibility_caption=item.get("accessibility_caption"),
+                    is_paid_partnership=item.get("is_paid_partnership", False),
+                    product_type=item.get("product_type"),
+                    shortcode=item.get("code"),
+                    carousel_children=carousel_children,
                 )
                 posts_out.append(post)
                 page_posts.append(post)
@@ -385,6 +520,12 @@ class WebSession:
                         int(ts), tz=timezone.utc
                     ) if ts else None,
                     "like_count": c.get("comment_like_count", 0),
+                    "parent_comment_id": str(c.get("parent_comment_id", "")),
+                    "reply_count": c.get("child_comment_count", 0),
+                    "commenter_full_name": u.get("full_name", ""),
+                    "commenter_pic_url": u.get("profile_pic_url", ""),
+                    "is_verified": u.get("is_verified", False),
+                    "created_at_utc": int(ts) if ts else None,
                 })
             return out
         except (ChallengeError, RateLimitError, SessionExpiredError):
@@ -417,7 +558,14 @@ def _extract_hashtags(text: str | None) -> list[str]:
 
 def _make_post(
     *, media_id, user_id, username, caption, like_count,
-    comment_count, taken_at, is_video, brand
+    comment_count, taken_at, is_video, brand,
+    image_url=None, video_url=None, thumbnail_url=None,
+    media_width=None, media_height=None, play_count=None,
+    view_count=None, carousel_count=None, location_name=None,
+    location_lat=None, location_lng=None, tagged_users=None,
+    accessibility_caption=None, is_paid_partnership=False,
+    product_type=None, shortcode=None,
+    carousel_children=None
 ) -> dict:
     return {
         "media_id": str(media_id),
@@ -432,4 +580,21 @@ def _make_post(
         "source_hashtag": f"@{username}",
         "scrape_mode": "auth",
         "brand": brand,
+        "image_url": image_url,
+        "video_url": video_url,
+        "thumbnail_url": thumbnail_url,
+        "media_width": media_width,
+        "media_height": media_height,
+        "play_count": play_count,
+        "view_count": view_count,
+        "carousel_count": carousel_count,
+        "location_name": location_name,
+        "location_lat": location_lat,
+        "location_lng": location_lng,
+        "tagged_users": tagged_users,
+        "accessibility_caption": accessibility_caption,
+        "is_paid_partnership": is_paid_partnership,
+        "product_type": product_type,
+        "shortcode": shortcode,
+        "carousel_children": carousel_children or [],
     }

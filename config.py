@@ -73,7 +73,7 @@ KEYWORDS_IN_CAPTIONS = list({
 POSTS_PER_ACCOUNT = 30           # Posts to fetch per brand account
 POSTS_PER_HASHTAG = 20           # Posts to fetch per hashtag (secondary)
 SCRAPE_DELAY_SECONDS = (2, 5)
-MAX_COMMENTS_PER_POST = 30
+MAX_COMMENTS_PER_POST = 50
 DB_PATH = "data/opinion_data.db"
 
 # ---------------------------------------------------------------------------
@@ -164,3 +164,12 @@ MULTI_STALK_GAP_MAX_MINUTES = 35.0
 # Karaca visit sizing — larger range to handle 3833 posts
 STALK_KARACA_VISIT_MIN_POSTS = 150
 STALK_KARACA_VISIT_MAX_POSTS = 280
+
+# Media storage
+MEDIA_DIR = os.environ.get("MEDIA_DIR", "data/media")
+DOWNLOAD_MEDIA = os.environ.get("DOWNLOAD_MEDIA", "1") == "1"
+MAX_MEDIA_STORAGE_GB = float(os.environ.get("MAX_MEDIA_STORAGE_GB", "9.0"))  # hard cap, leaves 1GB headroom
+MEDIA_IMAGE_MAX_WIDTH = 1080       # resize images to this width max before saving
+MEDIA_IMAGE_QUALITY = 85           # JPEG quality after recompression
+DOWNLOAD_VIDEOS = False            # thumbnails only by default — full videos too large
+MAX_COMMENTS_PER_POST = 50         # raise from 30 — we now capture replies too

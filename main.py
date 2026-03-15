@@ -261,7 +261,12 @@ def cmd_stats(_args: argparse.Namespace) -> None:
 def cmd_export(args: argparse.Namespace) -> None:
     storage.init_db()
     fmt = args.format.lower()
-    if fmt == "csv":
+    
+    if fmt == "zip":
+        from exporter import Exporter
+        exporter = Exporter()
+        exporter.export()
+    elif fmt == "csv":
         posts = storage.get_all_posts()
         comments = storage.get_all_comments()
         os.makedirs("data", exist_ok=True)
@@ -274,6 +279,33 @@ def cmd_export(args: argparse.Namespace) -> None:
     else:
         console.print(f"[red]Unsupported format: {fmt}[/]")
         sys.exit(1)
+
+
+def cmd_download(args: argparse.Namespace) -> None:
+    from media_downloader import MediaDownloader
+    
+    storage.init_db()
+    limit = args.batch_size
+    
+    downloader = MediaDownloader()
+    total_downloaded = 0
+    
+    console.print(f"[bold cyan]Starting media download (batch size: {limit})[/]")
+    
+    while True:
+        posts = storage.get_posts_pending_download(limit=limit)
+        if not posts:
+            break
+            
+        console.print(f"[dim]Processing batch of {len(posts)} posts...[/]")
+        downloaded = downloader.download_posts(posts)
+        total_downloaded += downloaded
+        console.print(f"  Downloaded {downloaded} new files")
+        
+        if len(posts) < limit:
+            break
+            
+    console.print(f"[green]Download complete. Total files: {total_downloaded}[/]")
 
 
 def _write_csv(path: str, rows: list[dict]) -> None:
@@ -361,7 +393,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # export
     p_export = sub.add_parser("export", help="Dump data to files")
-    p_export.add_argument("--format", default="csv", choices=["csv"])
+    p_export.add_argument("--format", default="zip", choices=["csv", "zip"])
+
+    # download
+    p_dl = sub.add_parser("download", help="Download media for collected posts")
+    p_dl.add_argument("--batch-size", type=int, default=50, help="Batch size for processing")
 
     return parser
 
@@ -384,6 +420,7 @@ def main() -> None:
         "sessions": cmd_sessions,
         "stats": cmd_stats,
         "export": cmd_export,
+        "download": cmd_download,
     }
 
     if args.command is None:

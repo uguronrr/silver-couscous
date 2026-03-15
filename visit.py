@@ -18,6 +18,7 @@ from warmup import (
     ProfileVisitRoutine, SearchRoutine
 )
 from web_session import WebSession
+from media_downloader import MediaDownloader
 
 console = Console()
 
@@ -57,6 +58,7 @@ class ProfileScrollActivity:
         self.progress = progress
         self.on_page_done = on_page_done
         self.brand = brand
+        self.downloader = MediaDownloader() if config.DOWNLOAD_MEDIA else None
 
     async def execute(self) -> int:
         """Execute profile scrolling via API pagination. Return posts collected."""
@@ -82,6 +84,12 @@ class ProfileScrollActivity:
                     storage.save_posts(page_posts)
                     posts_collected += len(page_posts)
                     self.progress["posts_collected"] += len(page_posts)
+                    
+                    # Trigger media download if enabled
+                    if self.downloader:
+                        downloaded = self.downloader.download_posts(page_posts)
+                        if downloaded > 0:
+                            console.print(f"    [dim]Downloaded {downloaded} media files[/]")
 
                 if page_comments:
                     storage.save_comments(page_comments)
