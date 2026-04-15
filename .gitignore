@@ -1,13 +1,32 @@
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 .DS_Store
-data/opinion_data.db
-data/sessions.db
-data/tasks.db
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local runtime/session state
 data/session.json
 data/stalk_progress.json
 data/stalk_*_progress.json
-data/media/
-data/stalk.log
 data/current_scraped_data.json
-*.zip
+data/report.json
+data/stalk.log
+
+# Databases
+data/*.db
+
+# Generated outputs
+data/media/
+data/posts.csv
+data/comments.csv
+data/*.zip
+
+# Keep tracked template
+!data/session.example.json
